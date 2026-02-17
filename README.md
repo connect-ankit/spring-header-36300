@@ -2,7 +2,7 @@
 
 ## 🔍 Overview
 
-This project demonstrates a non-deterministic behavior in Spring Framework's `Accept` header handling. Spring enforces a hard-coded limit of **50 media type elements** to prevent CPU-based Denial of Service (DoS) attacks. However, this validation is inconsistent across different endpoint configurations, leading to unpredictable behavior.
+This project demonstrates a non-deterministic behavior in Spring Framework's `Accept` header handling. Spring enforces a hard-coded limit of **50 media type elements** to prevent Denial of Service (DoS) attacks. However, this validation is inconsistent across different endpoint configurations, leading to unpredictable behavior.
 
 ## 📋 Project Information
 
