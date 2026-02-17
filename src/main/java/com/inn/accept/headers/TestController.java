@@ -1,34 +1,91 @@
 package com.inn.accept.headers;
 
-
 import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
-import org.springframework.util.InvalidMimeTypeException;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.HttpMediaTypeNotAcceptableException;
 
+/**
+ * TestController demonstrates Spring Framework's non-deterministic behavior in Accept header handling.
+ * 
+ * Spring enforces a 50-element limit on Accept headers to prevent DoS attacks, but this validation
+ * is inconsistent across different endpoint configurations, leading to unpredictable behavior.
+ * 
+ * Root Cause: org.springframework.util.MimeTypeUtils.sortBySpecificity(List<T> mimeTypes)
+ * throws InvalidMimeTypeException when mimeTypes.size() > 50
+ */
 @RestController
 public class TestController {
 
+    /**
+     * Phase 1 & 2: String Return Type - Content Negotiation Required
+     * 
+     * This endpoint MUST perform content negotiation to find a suitable String converter.
+     * Spring sorts the Accept header by specificity, triggering validation.
+     * 
+     * Observed Behavior (Fragility Zone):
+     * - 0-47 elements   → 200 OK (stable)
+     * - 48-50 elements  → 500 Error (unstable - depends on media type specificity)
+     *                     algorithm's internal expansion exceeds 50 elements before validation
+     * - 51+ elements    → 406 Error (hard limit enforced)
+     * 
+     * Test Commands:
+     * # 47 elements (stable):
+     * curl -vvv 'localhost:8081/v1/error' --header 'Accept: a/1,a/2,...,a/47'
+     * 
+     * # 48 elements + application/json (500 error):
+     * curl -vvv 'localhost:8081/v1/error' --header 'Accept: a/1,a/2,...,a/48,application/json'
+     * 
+     * # 51+ elements (406 error):
+     * curl -vvv 'localhost:8081/v1/error' --header 'Accept: a/1,a/2,...,a/51'
+     */
     @RequestMapping(value = "/v1/error", method = {RequestMethod.GET})
     public String test() {
-
-        //Since this returns a String and has no produces attribute, Spring defaults to text/plain or text/html
-        //400 Bad request. Without produces, client gets 406
-        return "406";
+        return "success";
     }
 
+    /**
+     * Phase 1: Void Return Type - No Content Negotiation
+     * 
+     * This endpoint returns void with no 'produces' attribute.
+     * Spring skips content negotiation since there's no response body.
+     * 
+     * Observed Behavior:
+     * - Even with 51+ Accept header elements → 200 OK (empty body)
+     * - Spring logs HttpMediaTypeNotAcceptableException internally but ignores it
+     * - Exception is suppressed because no response body needs to be serialized
+     *
+     * 
+     * Test Command:
+     * curl -vvv 'localhost:8081/v2/error' --header 'Accept: a/1,a/2,...,a/51'
+     * 
+     * Expected: 200 OK (but exception logged in DEBUG mode)
+     */
     @RequestMapping(value = "/v2/error", method = {RequestMethod.GET})
     public void test2() {
-     //This method returns nothing (void) and has no produces attribute
-    // Result: 200 OK (Empty Body). Since there is no content to negotiate, Spring doesn't find a reason to throw a 406 error.
-     // 2026-02-16T22:15:48.228+05:30 DEBUG 94061 --- [headers] [qtp704387627-33] m.m.a.RequestResponseBodyMethodProcessor : Ignoring error response content (if any). org.springframework.web.HttpMediaTypeNotAcceptableException: Could not parse 'Accept' header [application/json,application/type1,application/type2,application/type3,application/type4,application/type5,application/type6,application/type7,application/type8,application/type9,application/type10,application/type11,application/type12,application/type13,application/type14,application/type15,application/type16,application/type17,application/type18,application/type19,application/type20,application/type21,application/type22,application/type23,application/type24,application/type25,application/type26,application/type27,application/type28,application/type29,application/type30,application/type31,application/type32,application/type33,application/type34,application/type35,application/type36,application/type37,application/type38,application/type39,application/type40,application/type41,application/type42,application/type43,application/type44,application/type45,application/type46,application/type47,application/type48,application/type49,application/type50,application/type51,application/type52,application/type53,application/type54,application/type55,application/type56,application/type57,application/type58,application/type59,application/type60,application/type61,application/type62,application/type63,application/type64,application/type65,application/type66,application/type67,application/type68,application/type69]: Invalid mime type "[application/json, application/type1, application/type2, application/type3, application/type4, application/type5, application/type6, application/type7, application/type8, application/type9, application/type10, application/type11, application/type12, application/type13, application/type14, application/type15, application/type16, application/type17, application/type18, application/type19, application/type20, application/type21, application/type22, application/type23, application/type24, application/type25, application/type26, application/type27, application/type28, application/type29, application/type30, application/type31, application/type32, application/type33, application/type34, application/type35, application/type36, application/type37, application/type38, application/type39, application/type40, application/type41, application/type42, application/type43, application/type44, application/type45, application/type46, application/type47, application/type48, application/type49, application/type50, application/type51, application/type52, application/type53, application/type54, application/type55, application/type56, application/type57, application/type58, application/type59, application/type60, application/type61, application/type62, application/type63, application/type64, application/type65, application/type66, application/type67, application/type68, application/type69]": Too many elements
         System.out.println("test2");
-
     }
 
-
-    @RequestMapping(value = "/v3/error", method = {RequestMethod.GET},produces = MediaType.APPLICATION_JSON_VALUE)
+    /**
+     * Phase 1 & 3: Void Return Type with 'produces' - Contract Enforcement
+     * 
+     * This endpoint returns void but declares 'produces = application/json'.
+     * The 'produces' attribute forces Spring to validate the Accept header contract.
+     * 
+     * Observed Behavior:
+     * - Accept header mismatch (e.g., application/xml) → 406 Error
+     * - 51+ elements → 406 Error
+     * 
+     * Note: Both scenarios return 406 but for different reasons:
+     * 1. Media type mismatch: "Could not find acceptable representation"
+     * 2. Element limit exceeded: "Too many elements"
+     * 
+     * Test Commands:
+     * # Media type mismatch:
+     * curl -vvv 'localhost:8081/v3/error' --header 'Accept: application/xml'
+     * 
+     * # Element limit exceeded:
+     * curl -vvv 'localhost:8081/v3/error' --header 'Accept: a/1,a/2,...,a/51'
+     */
+    @RequestMapping(value = "/v3/error", method = {RequestMethod.GET}, produces = MediaType.APPLICATION_JSON_VALUE)
     public void test3() {
         System.out.println("test3");
     }
